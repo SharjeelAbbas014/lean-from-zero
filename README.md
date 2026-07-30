@@ -6,28 +6,37 @@ Personal notes / a 14-day walkthrough of interactive theorem proving with Lean 4
 
 ```bash
 npm install
+npm run build
+npx serve out
+```
+
+For the vinext/Cloudflare-style dev server:
+
+```bash
 npm run dev
 ```
 
 ## Share on Netlify
 
-This repo is set up for a static Netlify deploy (`netlify.toml` → `npx next build` → `out`).
+Static export (`netlify.toml` → `npx next build` → `out`).
 
-1. In Netlify: **Add new site → Import an existing project**
-2. Pick `lean-from-zero`
-3. Leave build settings as detected (`npx next build`, publish `out`)
-4. Deploy — then send friends the URL, or `/day/1`
+1. **Add new site → Import** `lean-from-zero`
+2. Build: `npx next build`, publish: `out`
+3. Deploy and share `/day/1`
+
+**Lean editor note:** Netlify hosts the course only. The Practice tab embeds [live.lean-lang.org](https://live.lean-lang.org) (real Lean server). If the iframe fails, use **Open fullscreen**.
 
 ## How to use it
 
-1. Start at the course map, or jump straight to a day URL.
-2. Read **Learn**, try the lab in the [Lean web editor](https://live.lean-lang.org/).
-3. Use **Review** for retrieval + quiz. Progress is stored in this browser only.
+1. **Learn** — read + per-day mini-game (local drills, not a compiler).
+2. **Practice** — embedded Lean lab, optional Natural Number Game / Logic Game side quests.
+3. **Review** — quiz (answers saved in this browser) + reflection notes.
 
 ## Layout
 
-- `app/course-data.ts` — day chapters, labs, quizzes
-- `app/deep-dives-*.ts` — longer supplements per day
+- `app/course-data.ts` — chapters, labs, quizzes
+- `app/play-content.ts` — mini-games, side quests, extra quiz items
+- `app/LeanEditor.tsx` — iframe playground
 - `app/CourseApp.tsx` — UI shell
 
 Grounded in [Theorem Proving in Lean 4](https://leanprover.github.io/theorem_proving_in_lean4/) and related official material.
