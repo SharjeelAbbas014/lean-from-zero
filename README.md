@@ -9,6 +9,15 @@ npm install
 npm run dev
 ```
 
+## Share on Netlify
+
+This repo is set up for a static Netlify deploy (`netlify.toml` → `npx next build` → `out`).
+
+1. In Netlify: **Add new site → Import an existing project**
+2. Pick `lean-from-zero`
+3. Leave build settings as detected (`npx next build`, publish `out`)
+4. Deploy — then send friends the URL, or `/day/1`
+
 ## How to use it
 
 1. Start at the course map, or jump straight to a day URL.
