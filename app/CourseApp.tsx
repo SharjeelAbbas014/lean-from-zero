@@ -2,14 +2,24 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { courseDays, glossary, sources, type CourseDay } from "./course-data";
+import {
+  courseDays,
+  enrichDay,
+  glossary,
+  sources,
+  type EnrichedDay,
+  type MiniGame,
+} from "./course-data";
 import { deepDiveByDay } from "./deep-dives";
 import type { DeepDiveChapter } from "./deep-dive-types";
+import LeanEditor from "./LeanEditor";
 
 type View = "overview" | "lesson" | "glossary";
 type LessonTab = "learn" | "practice" | "review";
 
 const STORAGE_KEY = "lean-field-guide-progress-v1";
+const QUIZ_STORAGE_KEY = "lean-field-guide-quiz-v1";
+const REFLECTION_STORAGE_KEY = "lean-field-guide-reflection-v1";
 
 function parseRoute(pathname: string): { view: View; day: number } {
   if (pathname === "/glossary" || pathname.startsWith("/glossary/")) {
@@ -194,81 +204,73 @@ function DeepDiveBook({ chapter }: { chapter: DeepDiveChapter }) {
   );
 }
 
-function ProofSimulator() {
+function TacticGame({ game }: { game: MiniGame }) {
   const [step, setStep] = useState(0);
-  const [message, setMessage] = useState("Choose the move that matches the outer shape of the goal.");
+  const [message, setMessage] = useState(game.prompt);
+  const finished = step >= game.steps.length;
+  const state = game.states[Math.min(step, game.states.length - 1)];
 
-  const states = [
-    { context: ["P : Prop"], goal: "P → P" },
-    { context: ["P : Prop", "h : P"], goal: "P" },
-    { context: ["P : Prop", "h : P"], goal: "No goals. Proof complete." },
-  ];
+  useEffect(() => {
+    setStep(0);
+    setMessage(game.prompt);
+  }, [game]);
 
   function choose(choice: string) {
-    if (step === 0 && choice === "intro h") {
-      setStep(1);
-      setMessage("Correct. intro assumes the left side of the arrow and names that evidence h.");
+    if (finished) return;
+    const current = game.steps[step];
+    if (choice === current.correct) {
+      setStep((value) => value + 1);
+      setMessage(current.success);
       return;
     }
-
-    if (step === 1 && choice === "exact h") {
-      setStep(2);
-      setMessage("Complete. The goal asks for P, and h is evidence of exactly P.");
-      return;
-    }
-
-    setMessage(
-      choice === "rfl"
-        ? "rfl is for equalities that reduce to the same expression. This goal is not an equality."
-        : "That move does not fit this goal yet. Read the goal’s outermost symbol first.",
-    );
+    setMessage(current.wrongHint);
   }
 
   return (
     <section className="simulator" aria-labelledby="simulator-title">
       <div className="simulator-copy">
-        <span className="eyebrow">Learning simulator</span>
-        <h3 id="simulator-title">Watch a proof state change</h3>
+        <span className="eyebrow">Mini-game</span>
+        <h3 id="simulator-title">{game.title}</h3>
         <p>
-          This models common Lean moves; it is not a Lean compiler. Predict the new goal before
-          pressing a tactic.
+          {game.prompt} This models Lean moves locally; it is not the Lean compiler. Use the
+          Practice tab for real checking.
         </p>
-        <CodeBlock code={`example (P : Prop) : P → P := by\n  ?`} />
+        {game.starterCode && <CodeBlock code={game.starterCode} />}
       </div>
       <div className="proof-workbench">
         <div className="state-panel">
           <span>Context</span>
-          {states[step].context.map((line) => (
+          {state.context.map((line) => (
             <code key={line}>{line}</code>
           ))}
         </div>
-        <div className="turnstile" aria-hidden="true">⊢</div>
+        <div className="turnstile" aria-hidden="true">
+          ⊢
+        </div>
         <div className="state-panel goal-panel">
           <span>Goal</span>
-          <code>{states[step].goal}</code>
+          <code>{state.goal}</code>
         </div>
-        <div className="tactic-choices" aria-label="Available tactics">
-          {step < 2 ? (
-            (step === 0 ? ["intro h", "rfl", "constructor"] : ["exact h", "rfl", "intro q"]).map(
-              (choice) => (
-                <button type="button" key={choice} onClick={() => choose(choice)}>
-                  {choice}
-                </button>
-              ),
-            )
-          ) : (
+        <div className="tactic-choices" aria-label="Available choices">
+          {finished ? (
             <button
               type="button"
               onClick={() => {
                 setStep(0);
-                setMessage("Choose the move that matches the outer shape of the goal.");
+                setMessage(game.prompt);
               }}
             >
               Try again
             </button>
+          ) : (
+            game.steps[step].choices.map((choice) => (
+              <button type="button" key={choice} onClick={() => choose(choice)}>
+                {choice}
+              </button>
+            ))
           )}
         </div>
-        <p className={step === 2 ? "sim-feedback success" : "sim-feedback"} aria-live="polite">
+        <p className={finished ? "sim-feedback success" : "sim-feedback"} aria-live="polite">
           {message}
         </p>
       </div>
@@ -280,16 +282,42 @@ function Quiz({
   day,
   onMastered,
 }: {
-  day: CourseDay;
+  day: EnrichedDay;
   onMastered: () => void;
 }) {
+  const storageId = String(day.day);
   const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [loaded, setLoaded] = useState(false);
   const hasRecordedMastery = useRef(false);
   const answeredCount = Object.keys(answers).length;
   const correctCount = day.quiz.reduce(
     (total, question, index) => total + (answers[index] === question.answer ? 1 : 0),
     0,
   );
+
+  useEffect(() => {
+    hasRecordedMastery.current = false;
+    try {
+      const raw = window.localStorage.getItem(QUIZ_STORAGE_KEY);
+      const all = raw ? (JSON.parse(raw) as Record<string, Record<number, number>>) : {};
+      setAnswers(all[storageId] ?? {});
+    } catch {
+      setAnswers({});
+    }
+    setLoaded(true);
+  }, [storageId]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      const raw = window.localStorage.getItem(QUIZ_STORAGE_KEY);
+      const all = raw ? (JSON.parse(raw) as Record<string, Record<number, number>>) : {};
+      all[storageId] = answers;
+      window.localStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify(all));
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [answers, loaded, storageId]);
 
   useEffect(() => {
     if (
@@ -348,7 +376,9 @@ function Quiz({
       ))}
       {answeredCount === day.quiz.length && (
         <div className="quiz-score">
-          <strong>{correctCount}/{day.quiz.length}</strong>
+          <strong>
+            {correctCount}/{day.quiz.length}
+          </strong>
           <span>
             {correctCount === day.quiz.length
               ? "Mastered. This day is now marked complete."
@@ -362,6 +392,60 @@ function Quiz({
         </div>
       )}
     </div>
+  );
+}
+
+function LabChecks({ day }: { day: EnrichedDay }) {
+  const checks = day.labChecks;
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  if (!checks?.length) return null;
+
+  return (
+    <section className="lab-checks" aria-label="Lab checks">
+      <span className="eyebrow">Quick lab checks</span>
+      <h3>Predict before you peek.</h3>
+      <div className="quiz-stack">
+        {checks.map((check, index) => (
+          <fieldset className="quiz-card" key={check.prompt}>
+            <legend>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {check.prompt}
+            </legend>
+            <div className="quiz-options">
+              {check.options.map((option, optionIndex) => {
+                const isAnswered = answers[index] !== undefined;
+                const selected = answers[index] === optionIndex;
+                const className = isAnswered
+                  ? optionIndex === check.answer
+                    ? "correct"
+                    : selected
+                      ? "incorrect"
+                      : ""
+                  : "";
+                return (
+                  <button
+                    type="button"
+                    key={option}
+                    className={className}
+                    disabled={isAnswered}
+                    onClick={() => setAnswers((current) => ({ ...current, [index]: optionIndex }))}
+                  >
+                    <span>{String.fromCharCode(65 + optionIndex)}</span>
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+            {answers[index] !== undefined && (
+              <p className="quiz-explanation">
+                {answers[index] === check.answer ? "That’s it. " : "Not quite. "}
+                {check.explanation}
+              </p>
+            )}
+          </fieldset>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -416,13 +500,24 @@ function Overview({
       <section className="how-to-use" aria-label="How to use this">
         <span className="eyebrow">How to use this</span>
         <p>
-          Open a day, read Learn, try the lab in the{" "}
-          <a href="https://live.lean-lang.org/" target="_blank" rel="noreferrer">
-            Lean web editor
-          </a>
-          , then quiz yourself under Review. Send a friend{" "}
-          <code>/day/1</code> (or any day) if you want them to jump straight in.
+          Open a day, read Learn (mini-game included), try the lab in the embedded Lean editor under
+          Practice, optionally play an external Lean game, then quiz yourself under Review. Send a
+          friend <code>/day/1</code> (or any day) to jump straight in. Progress and quiz answers stay
+          on this device.
         </p>
+      </section>
+
+      <section className="play-strip" aria-label="Recommended first game">
+        <span className="eyebrow">Want a game first?</span>
+        <div>
+          <h2>Natural Number Game</h2>
+          <p>
+            The best “Lean as a game” onboarding. Come back here when you want explanations and labs.
+          </p>
+          <a href="https://adam.math.hhu.de/#/g/leanprover-community/nng4" target="_blank" rel="noreferrer">
+            Play NNG →
+          </a>
+        </div>
       </section>
 
       <section className="manifesto">
@@ -488,7 +583,7 @@ function Overview({
         </div>
       </section>
 
-      <ProofSimulator />
+      {courseDays[3] && <TacticGame game={enrichDay(courseDays[3]).miniGame!} />}
 
       <section className="rhythm">
         <div>
@@ -531,7 +626,7 @@ function Lesson({
   onOpenDay,
   deepDive,
 }: {
-  day: CourseDay;
+  day: EnrichedDay;
   completed: boolean;
   onComplete: () => void;
   onOpenDay: (day: number) => void;
@@ -539,17 +634,46 @@ function Lesson({
 }) {
   const [tab, setTab] = useState<LessonTab>("learn");
   const [showSolution, setShowSolution] = useState(false);
+  const [reflection, setReflection] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(REFLECTION_STORAGE_KEY);
+      const all = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      setReflection(all[String(day.day)] ?? "");
+    } catch {
+      setReflection("");
+    }
+  }, [day.day]);
+
+  function saveReflection(value: string) {
+    setReflection(value);
+    try {
+      const raw = window.localStorage.getItem(REFLECTION_STORAGE_KEY);
+      const all = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      all[String(day.day)] = value;
+      window.localStorage.setItem(REFLECTION_STORAGE_KEY, JSON.stringify(all));
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <main className="lesson-page">
       <header className="lesson-hero">
         <div className="lesson-number">DAY {String(day.day).padStart(2, "0")}</div>
         <div>
-          <span className="eyebrow">{day.phase} · {day.duration}</span>
+          <span className="eyebrow">
+            {day.phase} · {day.duration}
+          </span>
           <h1>{day.title}</h1>
           <p>{day.subtitle}</p>
         </div>
-        <button className={completed ? "complete-button completed" : "complete-button"} type="button" onClick={onComplete}>
+        <button
+          className={completed ? "complete-button completed" : "complete-button"}
+          type="button"
+          onClick={onComplete}
+        >
           {completed ? "Completed ✓" : "Mark complete"}
         </button>
       </header>
@@ -574,7 +698,9 @@ function Lesson({
           <aside className="day-plan">
             <span className="eyebrow">Today’s outcomes</span>
             <ul>
-              {day.goals.map((goal) => <li key={goal}>{goal}</li>)}
+              {day.goals.map((goal) => (
+                <li key={goal}>{goal}</li>
+              ))}
             </ul>
             <span className="eyebrow">Study blocks</span>
             <ol>
@@ -593,7 +719,9 @@ function Lesson({
                 <div className="section-marker">{String(index + 1).padStart(2, "0")}</div>
                 <span className="eyebrow">{section.eyebrow}</span>
                 <h2>{section.title}</h2>
-                {section.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+                {section.paragraphs.map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
                 {section.diagram && <ConceptDiagram {...section.diagram} />}
                 {section.code && <CodeBlock code={section.code} note={section.codeNote} />}
                 <div className="takeaway">
@@ -602,8 +730,8 @@ function Lesson({
                 </div>
               </section>
             ))}
+            {day.miniGame && <TacticGame game={day.miniGame} />}
             {deepDive && <DeepDiveBook chapter={deepDive} />}
-            {day.day === 4 && <ProofSimulator />}
           </article>
         </div>
       )}
@@ -615,18 +743,52 @@ function Lesson({
             <h2>{day.lab.title}</h2>
             <p>{day.lab.brief}</p>
             <ol>
-              {day.lab.steps.map((step) => <li key={step}>{step}</li>)}
+              {day.lab.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
             </ol>
+            {day.playQuests && day.playQuests.length > 0 && (
+              <div className="side-quests">
+                <span className="eyebrow">Side quests</span>
+                {day.playQuests.map((quest) => (
+                  <a
+                    key={quest.url + quest.title}
+                    href={quest.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="side-quest"
+                  >
+                    <strong>{quest.title}</strong>
+                    <span>{quest.why}</span>
+                    <small>{quest.eta}</small>
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
           <div className="lab-code">
-            <CodeBlock code={day.lab.starter} note="Replace each ? with your proof or expression. Run this in a real Lean 4 file." />
-            <button className="solution-toggle" type="button" onClick={() => setShowSolution((current) => !current)}>
+            <LeanEditor
+              code={day.lab.starter}
+              solution={day.lab.solution}
+              title={`Day ${day.day} lab`}
+            />
+            <CodeBlock
+              code={day.lab.starter}
+              note="Starter also shown here so you can copy without waiting for the iframe."
+            />
+            <LabChecks day={day} />
+            <button
+              className="solution-toggle"
+              type="button"
+              onClick={() => setShowSolution((current) => !current)}
+            >
               {showSolution ? "Hide reference solution" : "Reveal reference solution"}
             </button>
             {showSolution && (
               <div className="solution">
                 <p>
-                  Compare the idea, not just the characters. There is often more than one good Lean proof.
+                  Compare the idea, not just the characters. There is often more than one good Lean
+                  proof. Prefer “Load solution” in the editor if you want Lean to check it.
                 </p>
                 <CodeBlock code={day.lab.solution} />
               </div>
@@ -641,12 +803,19 @@ function Lesson({
             <span className="eyebrow">Retrieval first</span>
             <h2>Can you say these without looking back?</h2>
             <ul>
-              {day.recap.map((item) => <li key={item}>{item}</li>)}
+              {day.recap.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
             </ul>
             <div className="reflection">
               <label htmlFor={`reflection-${day.day}`}>Explain today’s hardest idea to a friend:</label>
-              <textarea id={`reflection-${day.day}`} placeholder="Write two or three sentences in your own words…" />
-              <small>Reflection text is private to this page and is not submitted anywhere.</small>
+              <textarea
+                id={`reflection-${day.day}`}
+                value={reflection}
+                onChange={(event) => saveReflection(event.target.value)}
+                placeholder="Write two or three sentences in your own words…"
+              />
+              <small>Saved on this device only — nothing is submitted anywhere.</small>
             </div>
           </div>
           <div>
@@ -661,7 +830,9 @@ function Lesson({
         <button type="button" disabled={day.day === 1} onClick={() => onOpenDay(day.day - 1)}>
           ← Previous day
         </button>
-        <span>{day.day} of 14</span>
+        <span>
+          {day.day} of 14
+        </span>
         <button type="button" disabled={day.day === 14} onClick={() => onOpenDay(day.day + 1)}>
           Next day →
         </button>
@@ -751,7 +922,7 @@ export default function CourseApp() {
   }, [pathname, router]);
 
   const activeDay = useMemo(
-    () => courseDays.find((day) => day.day === route.day) ?? courseDays[0],
+    () => enrichDay(courseDays.find((day) => day.day === route.day) ?? courseDays[0]),
     [route.day],
   );
 

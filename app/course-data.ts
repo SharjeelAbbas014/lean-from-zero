@@ -1,3 +1,8 @@
+import { dayPlay } from "./play-content";
+import type { LabCheck, MiniGame, PlayQuest } from "./play-content";
+
+export type { LabCheck, MiniGame, PlayQuest };
+
 export type CourseSection = {
   title: string;
   eyebrow: string;
@@ -37,6 +42,24 @@ export type CourseDay = {
   quiz: QuizQuestion[];
   recap: string[];
 };
+
+export type EnrichedDay = CourseDay & {
+  miniGame?: MiniGame;
+  playQuests?: PlayQuest[];
+  labChecks?: LabCheck[];
+};
+
+export function enrichDay(day: CourseDay): EnrichedDay {
+  const play = dayPlay[day.day];
+  if (!play) return day;
+  return {
+    ...day,
+    miniGame: play.miniGame,
+    playQuests: play.playQuests,
+    labChecks: play.labChecks,
+    quiz: [...day.quiz, ...play.extraQuiz],
+  };
+}
 
 export const courseDays: CourseDay[] = [
   {
@@ -103,7 +126,7 @@ export const courseDays: CourseDay[] = [
     ],
     lab: {
       title: "Make Lean answer five tiny questions",
-      brief: "Use the Lean web editor or a local Main.lean file. Predict each answer before Lean shows it.",
+      brief: "Use the embedded Lean lab below (or open it fullscreen). Predict each answer before Lean shows it.",
       steps: [
         "Check the types of false, Nat, Nat.succ, and fun x : Nat => x + 1.",
         "Evaluate 6 * 7, [1, 2, 3].length, and (10 > 3).",

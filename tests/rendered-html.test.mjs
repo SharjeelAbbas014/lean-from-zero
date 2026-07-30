@@ -34,6 +34,7 @@ test("server-renders the finished Lean course shell", async () => {
   assert.match(html, /certainty\./);
   assert.match(html, /Begin day one/);
   assert.match(html, /How to use this/);
+  assert.match(html, /Natural Number Game/);
   assert.match(html, /Your two-week map/);
   assert.match(html, /Watch a proof state change/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/);

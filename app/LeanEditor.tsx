@@ -5,18 +5,21 @@ import { buildLeanPlaygroundUrl } from "./lean-playground";
 
 type LeanEditorProps = {
   code: string;
+  solution?: string;
   title?: string;
 };
 
-export default function LeanEditor({ code, title = "Lean lab" }: LeanEditorProps) {
+export default function LeanEditor({ code, solution, title = "Lean lab" }: LeanEditorProps) {
   const [editorCode, setEditorCode] = useState(code);
   const [mobile, setMobile] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
   const [iframeFailed, setIframeFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     setEditorCode(code);
     setIframeFailed(false);
+    setExpanded(false);
   }, [code]);
 
   useEffect(() => {
@@ -32,29 +35,50 @@ export default function LeanEditor({ code, title = "Lean lab" }: LeanEditorProps
     [editorCode, mobile],
   );
 
+  function reloadWith(next: string) {
+    setEditorCode(next);
+    setIframeFailed(false);
+    setIframeKey((key) => key + 1);
+  }
+
   return (
     <section className="lean-editor" aria-label={title}>
       <div className="lean-editor-bar">
         <span>{title}</span>
         <div className="lean-editor-actions">
-          <button type="button" onClick={() => { setEditorCode(code); setIframeKey((k) => k + 1); }}>
-            Reload lab
-          </button>
-          <button
-            type="button"
-            onClick={() => window.open(playgroundUrl, "_blank", "noopener,noreferrer")}
-          >
+          {!expanded && (
+            <button type="button" onClick={() => setExpanded(true)}>
+              Open Lean lab
+            </button>
+          )}
+          {expanded && (
+            <button type="button" onClick={() => reloadWith(code)}>
+              Reload lab
+            </button>
+          )}
+          {expanded && solution && (
+            <button type="button" onClick={() => reloadWith(solution)}>
+              Load solution
+            </button>
+          )}
+          <a href={playgroundUrl} target="_blank" rel="noreferrer">
             Open fullscreen
-          </button>
+          </a>
         </div>
       </div>
       <p className="lean-editor-note">
-        Real Lean runs on live.lean-lang.org — this page embeds it. Edit below the fold in the editor; goals appear in the Infoview.
+        Real Lean runs on live.lean-lang.org — this page embeds it. Edit in the frame; goals appear in the Infoview.
       </p>
-      {iframeFailed ? (
+      {!expanded ? (
+        <button type="button" className="lean-editor-launch" onClick={() => setExpanded(true)}>
+          Load interactive Lean editor for this lab
+        </button>
+      ) : iframeFailed ? (
         <div className="lean-editor-fallback">
           <p>The embed did not load. Open the lab directly instead.</p>
-          <a href={playgroundUrl} target="_blank" rel="noreferrer">Open lab in Lean</a>
+          <a href={playgroundUrl} target="_blank" rel="noreferrer">
+            Open lab in Lean
+          </a>
         </div>
       ) : (
         <iframe
